@@ -1,0 +1,78 @@
+.msgraph_div {
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.msgraph_div > .setting-item {
+    border-top: none !important;
+    align-self: center;
+}
+
+.msgraph_div > .setting-item > .setting-item-control {
+    justify-content: space-around;
+    padding: 0;
+    width: 100%;
+}
+
+.msgraph_div
+    > .setting-item
+    > .setting-item-control
+    > .setting-editor-extra-setting-button {
+    align-self: center;
+}
+
+.msgraph_title {
+    margin: 0;
+    padding: 0;
+    margin-top: 5px;
+    text-align: center;
+}
+
+.msgraph_display_name {
+    align-self: center;
+    margin-left: 5px;
+    margin-right: 5px;
+    width: 20%;
+}
+
+.msgraph_client_id {
+    align-self: center;
+    margin-left: 5px;
+    margin-right: 5px;
+    width: 20%;
+}
+
+.msgraph_client_secret {
+    align-self: center;
+    margin-left: 5px;
+    margin-right: 5px;
+    width: 20%;
+}
+
+.msgraph_client_authority {
+    align-self: center;
+    margin-left: 5px;
+    margin-right: 5px;
+    width: 20%;
+}
+
+.msgraph_template {
+    align-self: center;
+    margin-left: 5px;
+    margin-right: 5px;
+    width: 50em;
+    height: 7em;
+}
+
+.msgraph_input {
+    align-self: center;
+    margin-left: 5px;
+    margin-right: 5px;
+    width: 20%;
+}
+
+.msgraph_number {
+    align-self: center;
+    margin-left: 5px;
+    margin-right: 5px;
+    width: 5%;
+}

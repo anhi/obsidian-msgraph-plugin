@@ -1,0 +1,36 @@
+{
+	"name": "obsidian-sample-plugin",
+	"version": "1.0.1",
+	"description": "This is a sample plugin for Obsidian (https://obsidian.md)",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"version": "node version-bump.mjs && git add manifest.json versions.json"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "MIT",
+	"devDependencies": {
+		"@microsoft/microsoft-graph-types": "^2.16.0",
+		"@types/luxon": "^2.3.1",
+		"@types/node": "^16.11.6",
+		"@typescript-eslint/eslint-plugin": "^5.2.0",
+		"@typescript-eslint/parser": "^5.2.0",
+		"builtin-modules": "^3.2.0",
+		"electron": "^17.1.2",
+		"esbuild": "0.13.12",
+		"obsidian": "latest",
+		"tslib": "2.3.1",
+		"typescript": "4.4.4"
+	},
+	"dependencies": {
+		"@azure/identity": "^2.0.4",
+		"@azure/msal-node": "^1.7.0",
+		"@azure/msal-node-extensions": "^1.0.0-alpha.15",
+		"@electron/remote": "^2.0.8",
+		"@microsoft/microsoft-graph-client": "^3.0.2",
+		"eta": "^1.12.3",
+		"luxon": "^2.3.1"
+	}
+}

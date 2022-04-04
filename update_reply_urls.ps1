@@ -1,0 +1,1 @@
+az rest --method PATCH     --uri 'https://graph.microsoft.com/v1.0/applications/XXX-XXXXXXXXX'    --headers 'Content-Type=application/json'  --body "{spa:{redirectUris:['obsidian://msgraph']}}"
