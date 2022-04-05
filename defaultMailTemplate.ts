@@ -5,7 +5,7 @@ export const defaultMailTemplate =
     }
 
     formatDateTime = (dt) => {
-        return new Date(dt).toLocaleString([])
+        return moment.utc(dt).local().locale(navigator.language).toLocaleString([])
     }
 
     formatBody = (body) => {

@@ -4,6 +4,7 @@ import MSGraphPlugin from "MSGraphPlugin"
 import { SelectMailFolderModal } from "selectMailFolderModal"
 
 import * as Eta from 'eta'
+import { MSGraphMailFolderAccess } from "types"
 
 
 export class MailHandler {
@@ -57,8 +58,6 @@ export class MailHandler {
 
 		root_folders = root_folders.concat((await request.get()).value)
 
-		console.log(root_folders)
-
 		return root_folders
 	}
 
@@ -70,16 +69,21 @@ export class MailHandler {
 		selector.open()
 	}
 
-	getMailsForFolder = async (authProvider: MSALAuthProvider, folderId: string, query?: string, maxResults?: number) => {
-		const graphClient = this.plugin.getGraphClient(authProvider)
+	getMailsForFolder = async (mf: MSGraphMailFolderAccess) => {
+        const authProvider = this.plugin.msalProviders[mf.provider]
 
-		let request = graphClient.api(`/me/mailFolders/${folderId}/messages`)
+        const graphClient = this.plugin.getGraphClient(authProvider)
 
-		if (query !== undefined)
-			request = request.query(query)
+		let request = graphClient.api(`/me/mailFolders/${mf.id}/messages`)
 
-		if (maxResults !== undefined)
-			request = request.top(maxResults)
+		if (mf.query !== undefined)
+			request = request.query(mf.query)
+
+		if (mf.limit !== undefined)
+			request = request.top(mf.limit)
+
+        if (mf.onlyFlagged)
+            request = request.filter('flag/flagStatus eq \'flagged\'')
 
 		return (await request.get()).value
 	}
@@ -87,20 +91,22 @@ export class MailHandler {
     getMailsForAllFolders = async () => {
         const mails:Record<string, [OutlookItem]> = {}
         for (const mf of this.plugin.settings.mailFolders) {
-            mails[mf.displayName] = await this.getMailsForFolder(this.plugin.msalProviders[mf.provider], mf.id, mf.query, mf.limit)
+            mails[mf.displayName] = await this.getMailsForFolder(mf)
         }
 
         return mails
     }
 
-	formatMails = (mails:Record<string,[any]>):string => {
+	formatMails = (mails:Record<string,[any]>, as_tasks=false):string => {
 		let result = ""
 
         for (const folder in mails) {
             result += `# ${folder}\n\n`
 
             for (const m of mails[folder]) {
-                result += Eta.render(this.plugin.settings.mailTemplate, m) + "\n\n"
+                result += Eta.render(as_tasks
+                    ? this.plugin.settings.flaggedMailTemplate 
+                    : this.plugin.settings.mailTemplate, m) + "\n\n"
             }
    
             result += "\n"
@@ -108,4 +114,8 @@ export class MailHandler {
 
 		return result
 	}
+
+    formatMailsForAllFolders = async (as_tasks=false): Promise<string> => {
+        return this.formatMails(await this.getMailsForAllFolders(), as_tasks)
+    }
 }

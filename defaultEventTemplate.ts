@@ -1,8 +1,12 @@
 export const defaultEventTemplate =
 `<%
-    formatTime = (ds) => {
-	    return new Date(ds).toLocaleTimeString([], {hour: 'numeric', minute: 'numeric'})
+    formatTime = (dt) => {
+	    return moment.utc(dt).local().locale(navigator.language).format("LT")
 	}
 %>
 
-### <%= formatTime(it.start.dateTime) %>-<%= formatTime(it.end.dateTime) %>: <%~ it.subject %>`
+<% if (it.isAllDay) { %>
+### All day: <%~ it.subject %>
+<% } else { %>
+### <%= formatTime(it.start.dateTime) %>-<%= formatTime(it.end.dateTime) %>: <%~ it.subject %>
+<% } %>`

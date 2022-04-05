@@ -17,8 +17,9 @@ export type EventWithProvider = MicrosoftGraph.Event & {provider: string}
 
 export class MSGraphMailFolderAccess {
     displayName = ""
-    provider = ""
-    id       = ""
-    limit    = 100
-    query    = ""
+    provider    = ""
+    id          = ""
+    limit       = 100
+    query       = ""
+    onlyFlagged = false
 }

@@ -74,4 +74,8 @@ export class CalendarHandler {
 
 		return result
 	}
+
+    formatEventsForToday = async () => {
+        return this.formatEvents(await this.getEventsForToday())
+    }
 }

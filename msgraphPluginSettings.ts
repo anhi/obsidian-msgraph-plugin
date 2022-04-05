@@ -9,20 +9,22 @@ import { MailFolder } from '@microsoft/microsoft-graph-types';
 
 import { defaultEventTemplate } from "./defaultEventTemplate"
 import { defaultMailTemplate } from "./defaultMailTemplate"
-
+import { defaultFlaggedMailTemplate } from "./defaultFlaggedMailTemplate"
 
 export interface MSGraphPluginSettings {
 	accounts: Array<MSGraphAccount>,
 	mailFolders: Array<MSGraphMailFolderAccess>,
 	eventTemplate: string,
-	mailTemplate: string
+	mailTemplate: string,
+	flaggedMailTemplate: string,
 }
 
 export const DEFAULT_SETTINGS: MSGraphPluginSettings = {
 	accounts: [new MSGraphAccount()],
 	mailFolders: [new MSGraphMailFolderAccess()],
 	eventTemplate: defaultEventTemplate,
-	mailTemplate: defaultMailTemplate
+	mailTemplate: defaultMailTemplate,
+	flaggedMailTemplate: defaultFlaggedMailTemplate,
 }
 
 export class MSGraphPluginSettingsTab extends PluginSettingTab {
@@ -299,6 +301,18 @@ export class MSGraphPluginSettingsTab extends PluginSettingTab {
 						})
 						t.inputEl.addClass("msgraph-number")
 				})
+				.addDropdown((dropdown) => {
+					dropdown
+						.addOptions({all: "All emails", flagged: "Only flagged emails"})
+						.setValue(folder.onlyFlagged ? 'flagged' : 'all')
+						.onChange((new_value) => {
+							folder.onlyFlagged = new_value === 'flagged'
+							this.plugin.saveSettings()
+						})
+						
+						dropdown.selectEl.addClass("msgraph_input")
+					}
+				)
 
 				s.infoEl.remove();
 				
@@ -359,6 +373,32 @@ export class MSGraphPluginSettingsTab extends PluginSettingTab {
 					})
 				t.inputEl.addClass("msgraph_template")
 			})
-		}
+
+		new Setting(this.containerEl)
+			.setName("Flagged mail template")
+			.setDesc("Template for rendering flagged mail items as tasks")
+			.addButton((button) => {
+				button
+					.setButtonText("Default")
+					.setTooltip("Restore default template")
+					.onClick(() => {
+						this.plugin.settings.flaggedMailTemplate = defaultFlaggedMailTemplate
+						this.plugin.saveSettings();
+						// Force refresh
+						this.display();
+					});
+			})
+			.addTextArea((text) => {
+				const t = text
+					.setPlaceholder("Template Text")
+					.setValue(this.plugin.settings.flaggedMailTemplate)
+					.onChange((new_value) => {
+						this.plugin.settings.flaggedMailTemplate = new_value
+						this.plugin.saveSettings()
+					})
+				t.inputEl.addClass("msgraph_template")
+			})
+
+	}
         
 }

@@ -72,11 +72,22 @@ export default class MSGraphPlugin extends Plugin {
 			id: 'get-mails-from-all-folders',
 			name: 'Append mails from all folders registered in the settings',
 			editorCallback: async (editor: Editor, view: MarkdownView) => {
-				const result = await this.mailHandler.formatMails(await this.mailHandler.getMailsForAllFolders())
+				const result = await this.mailHandler.formatMails(await this.mailHandler.getMailsForAllFolders(), false)
 
 				editor.replaceSelection(result)
 			}
 		})
+
+		this.addCommand({
+			id: 'get-mails-from-all-folders-as-tasks',
+			name: 'Append mails from all folders registered in the settings and format as tasks',
+			editorCallback: async (editor: Editor, view: MarkdownView) => {
+				const result = await this.mailHandler.formatMails(await this.mailHandler.getMailsForAllFolders(), true)
+
+				editor.replaceSelection(result)
+			}
+		})
+
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new MSGraphPluginSettingsTab(this.app, this));
