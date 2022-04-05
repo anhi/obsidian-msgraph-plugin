@@ -5,6 +5,7 @@ import { SelectMailFolderModal } from "selectMailFolderModal"
 
 import * as Eta from 'eta'
 import { MSGraphMailFolderAccess } from "types"
+import moment from "moment"
 
 
 export class MailHandler {
@@ -89,7 +90,7 @@ export class MailHandler {
 	}
 
     getMailsForAllFolders = async () => {
-        const mails:Record<string, [OutlookItem]> = {}
+        const mails:Record<string, OutlookItem[]> = {}
         for (const mf of this.plugin.settings.mailFolders) {
             mails[mf.displayName] = await this.getMailsForFolder(mf)
         }
@@ -97,7 +98,7 @@ export class MailHandler {
         return mails
     }
 
-	formatMails = (mails:Record<string,[any]>, as_tasks=false):string => {
+	formatMails = (mails:Record<string, any[]>, as_tasks=false):string => {
 		let result = ""
 
         for (const folder in mails) {
@@ -117,5 +118,23 @@ export class MailHandler {
 
     formatMailsForAllFolders = async (as_tasks=false): Promise<string> => {
         return this.formatMails(await this.getMailsForAllFolders(), as_tasks)
+    }
+
+    dueFilter = (m:any) => { 
+        return (m?.flag?.dueDateTime?.dateTime !== undefined) 
+            ? moment.utc(m.flag.dueDateTime.dateTime) <= moment() 
+            : true 
+    }
+
+    formatOverdueMailsForAllFolders = async (): Promise<string> => {
+        const ms = await this.getMailsForAllFolders()
+
+        for (const folder in ms) {
+            if (ms[folder].length > 0) {
+                ms[folder] = ms[folder].filter(this.dueFilter)
+            }
+        }
+
+        return this.formatMails(ms, true)
     }
 }
