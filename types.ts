@@ -11,6 +11,8 @@ export class MSGraphAccount {
     clientSecret = ""
     authority    = "https://login.microsoftonline.com/common"
     enabled      = false
+    type         = "MSGraph"
+    baseUri      = ""
 }
 
 export type EventWithProvider = MicrosoftGraph.Event & {provider: string}

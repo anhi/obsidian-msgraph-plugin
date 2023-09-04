@@ -1,6 +1,6 @@
 import { ClientApplication } from "@azure/msal-node";
 //import { FilePersistenceWithDataProtection, DataProtectionScope } from "@azure/msal-node-extensions";
-import { requestConfig } from 'authConfig'
+import { requestConfig, ewsRequestConfig } from 'authConfig'
 
 import { shell } from "electron";
 import { PublicClientApplication } from '@azure/msal-node';
@@ -14,7 +14,6 @@ import { MSGraphAccount } from "types";
 import MSGraphPlugin from "MSGraphPlugin";
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { ObsidianTokenCachePlugin } from "ObsidianTokenCachePlugin";
-
 
 const { safeStorage } = require('@electron/remote')
 
@@ -83,8 +82,10 @@ export class MSALAuthProvider implements AuthenticationProvider {
             // todo: logic to choose the correct account
             //       for now, just use the first one
             const account = accounts[0]
+
+            const config = this.account.type == "MSGraph" ? requestConfig : ewsRequestConfig(this.account.baseUri);
             const silentRequest: SilentFlowRequest = {
-                ...requestConfig.request.silentRequest,
+                ...config.request.silentRequest,
                 account: account
             }
 
@@ -96,7 +97,7 @@ export class MSALAuthProvider implements AuthenticationProvider {
                     console.info("Successfully obtained access token from cache!")
                     return accessToken
                 })
-                .catch((error: any)  => {
+                .catch((error: unknown)  => {
                     return ""
             })
         } else {
@@ -146,8 +147,10 @@ export function msalLogin(msalProvider: MSALAuthProvider) {
         challenge: msalProvider.authConfig.challenge
       };
   
+    const config = msalProvider.account.type == "MSGraph" ? requestConfig : ewsRequestConfig(msalProvider.account.baseUri);
+
     const authCodeUrlParams = { 
-        ...requestConfig.request.authCodeUrlParameters, // redirectUri, scopes
+        ...config.request.authCodeUrlParameters, // redirectUri, scopes
         state: msalProvider.account.displayName,
         codeChallenge: pkceCodes.challenge, // PKCE Code Challenge
         codeChallengeMethod: pkceCodes.challengeMethod, // PKCE Code Challenge Method
@@ -171,9 +174,11 @@ export function msalRedirect(plugin: MSGraphPlugin, query: any) {
 
     const authProvider = plugin.msalProviders[displayName]
 
+    const config = authProvider.account.type == "MSGraph" ? requestConfig : ewsRequestConfig(authProvider.account.baseUri);
+
     // Add PKCE code verifier to token request object
     const tokenRequest: AuthorizationCodeRequest = {
-        ...requestConfig.request.tokenRequest,
+        ...config.request.tokenRequest,
         code: query.code as string,
         codeVerifier: authProvider.authConfig.verifier, // PKCE Code Verifier
         clientInfo: query.client_info as string
@@ -181,8 +186,14 @@ export function msalRedirect(plugin: MSGraphPlugin, query: any) {
 
     authProvider.msalClient.acquireTokenByCode(tokenRequest).then((response: AuthenticationResult) => {
         authProvider.cachePlugin.acquired = true
-    }).catch((error: any) => {
+    }).catch((error: unknown) => {
         console.log(error)
         authProvider.cachePlugin.acquired = false
     })
+}
+
+export async function refreshAllTokens(plugin: MSGraphPlugin) {
+    await Promise.all(Object.values(plugin.msalProviders).map(
+        async (provider) => {if (provider.account.enabled) provider.getTokenSilently()}
+    ))
 }

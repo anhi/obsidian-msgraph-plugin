@@ -1,6 +1,6 @@
 import { Editor, MarkdownView, ObsidianProtocolData, Plugin } from 'obsidian';
 
-import { MSALAuthProvider, msalRedirect } from 'authProvider';
+import { MSALAuthProvider, msalRedirect, refreshAllTokens } from 'authProvider';
 import { Client } from '@microsoft/microsoft-graph-client';
 
 
@@ -88,9 +88,13 @@ export default class MSGraphPlugin extends Plugin {
 			}
 		})
 
-
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new MSGraphPluginSettingsTab(this.app, this));
+
+		// Try to refresh the tokens every 30 minutes
+		this.registerInterval(
+			window.setInterval(() => refreshAllTokens(this), 1000 * 60 * 30)
+		)
 	}
 
 	onunload() {

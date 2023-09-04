@@ -48,7 +48,14 @@
     width: 20%;
 }
 
-.msgraph_client_authority {
+.msgraph_authority {
+    align-self: center;
+    margin-left: 5px;
+    margin-right: 5px;
+    width: 20%;
+}
+
+.msgraph_baseuri {
     align-self: center;
     margin-left: 5px;
     margin-right: 5px;
@@ -68,6 +75,13 @@
     margin-left: 5px;
     margin-right: 5px;
     width: 20%;
+}
+
+.msgraph_provider_type {
+    align-self: center;
+    margin-left: 5px;
+    margin-right: 5px;
+    width: 15% !important;
 }
 
 .msgraph_number {

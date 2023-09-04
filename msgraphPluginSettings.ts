@@ -172,6 +172,30 @@ export class MSGraphPluginSettingsTab extends PluginSettingTab {
 							}
 						})
 				})
+				.addDropdown((dropdown) => {
+					dropdown.addOptions(
+						{MSGraph: "MSGraph", EWS: "EWS"}
+					)
+					.setValue(this.plugin.settings.accounts[index].type)
+					.onChange((new_value) => {
+						this.plugin.settings.accounts[index].type = new_value
+						this.plugin.saveSettings()
+					})
+					
+					dropdown.selectEl.addClass("msgraph_provider_type")
+				})
+				.addText((text) => {
+					const t = text
+						.setPlaceholder("EWS URL")
+						.setValue(account.baseUri)
+						.onChange((new_value) => {
+							this.plugin.settings.accounts[index].baseUri = new_value;
+							this.plugin.saveSettings();
+						});
+					t.inputEl.addClass("msgraph_baseuri");
+
+					return t;
+				})
                 
 				s.infoEl.remove();
 				
@@ -255,7 +279,7 @@ export class MSGraphPluginSettingsTab extends PluginSettingTab {
 						d.selectEl.addClass("msgraph_input")
 				})
 				.addText((text) => {
-					const t = text
+					text
 						.setPlaceholder("<Id or path>")
 						.setValue(folder.id)
 						.onChange((new_value) => {

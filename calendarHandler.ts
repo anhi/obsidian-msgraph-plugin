@@ -4,15 +4,19 @@ import { EventWithProvider } from "types";
 
 import { Event } from '@microsoft/microsoft-graph-types'
 
-import luxon, { DateTime } from "luxon";
+import { DateTime } from "luxon";
 
-import * as Eta from 'eta'
+// @ts-ignore
+import * as Eta from './node_modules/eta/dist/browser.module.mjs'
+import { AppointmentSchema, BasePropertySet, CalendarFolder, CalendarView, DateTime as EWSDateTime, EmailMessageSchema, EwsLogging, ExchangeService, FolderId, ItemView, Mailbox, OAuthCredentials, PropertySet, Uri, WellKnownFolderName } from "ews-javascript-api"
 
 export class CalendarHandler {
     plugin:MSGraphPlugin
+	eta:Eta.Eta
 
     constructor(plugin:MSGraphPlugin) {
         this.plugin = plugin
+		this.eta = new Eta.Eta()
     }
 
     getEventsForTimeRange = async (start:DateTime, end:DateTime):Promise<Record<string, [Event]>> => {
@@ -21,25 +25,61 @@ export class CalendarHandler {
 		// todo: fetch in parallel using Promise.all()?
 		for (const authProviderName in this.plugin.msalProviders) {
 			const authProvider = this.plugin.msalProviders[authProviderName]
-			const graphClient = this.plugin.getGraphClient(authProvider)
 
-			const dateQuery = `startDateTime=${start.toISODate()}&endDateTime=${end.toISODate()}`;
-			
-			const events = await graphClient
-				.api('/me/calendarView').query(dateQuery)
-				//.select('subject,start,end')
-				.orderby(`start/DateTime`)
-				.get();
+			if (authProvider.account.type == "MSGraph") {
+				const graphClient = this.plugin.getGraphClient(authProvider)
 
-			events_by_provider[authProviderName] = events.value
+				const dateQuery = `startDateTime=${start.toISODate()}&endDateTime=${end.toISODate()}`;
+				
+				const events = await graphClient
+					.api('/me/calendarView').query(dateQuery)
+					//.select('subject,start,end')
+					.orderby(`start/DateTime`)
+					.get();
+
+				events_by_provider[authProviderName] = events.value
+			} else if (authProvider.account.type == "EWS") {
+				const authProvider = this.plugin.msalProviders[authProviderName]
+
+				const token = await authProvider.getAccessToken()
+
+				const svc = new ExchangeService();
+				//EwsLogging.DebugLogEnabled = true; // false to turnoff debugging. 
+				svc.Url = new Uri(`${authProvider.account.baseUri}/EWS/Exchange.asmx`);
+				
+				svc.Credentials = new OAuthCredentials(token);
+
+				// Initialize values for the start and end times, and the number of appointments to retrieve.
+				
+				// Initialize the calendar folder object with only the folder ID. 
+				const calendar = await CalendarFolder.Bind(svc, WellKnownFolderName.Calendar, new PropertySet());
+
+				// Set the start and end time and number of appointments to retrieve.
+				const calendarView = new CalendarView(new EWSDateTime(start.toMillis()), new EWSDateTime(end.toMillis()));
+				
+				// Limit the properties returned to the appointment's subject, start time, and end time.
+				calendarView.PropertySet = new PropertySet(AppointmentSchema.Subject, AppointmentSchema.Start, AppointmentSchema.End, AppointmentSchema.IsAllDayEvent);
+				// Retrieve a collection of appointments by using the calendar view.
+				const appointments = await calendar.FindAppointments(calendarView);
+
+				const results = appointments.Items.map(({ Subject, Start, End, IsAllDayEvent }) => (
+					{
+						subject: Subject, 
+						start: {dateTime: Start.ToISOString()}, 
+						end: {dateTime: End.ToISOString()}, 
+						isAllDay: IsAllDayEvent 
+					} as Event)) as [Event];
+				
+				events_by_provider[authProviderName] = results
+			}
 		}
 
 		return events_by_provider
 	}
 
 	getEventsForToday = async () => {
-		const today = DateTime.now()
-		const tomorrow = DateTime.now().plus({days: 1})
+		const today = DateTime.now().startOf('day')
+		const tomorrow = DateTime.now().plus({days: 1}).endOf('day')
 		
 		return await this.getEventsForTimeRange(today, tomorrow)
 	}
@@ -68,8 +108,13 @@ export class CalendarHandler {
 
 		const flat_events = this.flattenAndSortEventsByStartTime(events)
 
-		for (const e of flat_events) {
-			result += Eta.render(this.plugin.settings.eventTemplate, {...e,  luxon: luxon}) + "\n\n"
+		try {
+			for (const e of flat_events) {
+				console.log(e)
+				result += this.eta.renderString(this.plugin.settings.eventTemplate, {...e,  luxon:DateTime }) + "\n\n"
+			}
+		} catch (e) {
+			console.error(e)
 		}
 
 		return result

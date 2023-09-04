@@ -1,18 +1,22 @@
-import { MailFolder, OutlookItem } from "@microsoft/microsoft-graph-types"
+import { MailFolder, Message, OutlookItem } from "@microsoft/microsoft-graph-types"
 import { MSALAuthProvider } from "authProvider"
 import MSGraphPlugin from "MSGraphPlugin"
 import { SelectMailFolderModal } from "selectMailFolderModal"
 
-import * as Eta from 'eta'
+// @ts-ignore
+import * as Eta from './node_modules/eta/dist/browser.module.mjs'
+
 import { MSGraphMailFolderAccess } from "types"
 import moment from "moment"
 
 
 export class MailHandler {
     plugin:MSGraphPlugin
+	eta:Eta.Eta
 
     constructor(plugin:MSGraphPlugin) {
         this.plugin = plugin
+		this.eta = new Eta.Eta()
     }
 
     getMailFolders = async (authProvider: MSALAuthProvider, limit=250):Promise<MailFolder[]> => {
@@ -98,14 +102,14 @@ export class MailHandler {
         return mails
     }
 
-	formatMails = (mails:Record<string, any[]>, as_tasks=false):string => {
+	formatMails = (mails:Record<string, unknown[]>, as_tasks=false):string => {
 		let result = ""
 
         for (const folder in mails) {
             result += `# ${folder}\n\n`
 
             for (const m of mails[folder]) {
-                result += Eta.render(as_tasks
+                result += this.eta.renderString(as_tasks
                     ? this.plugin.settings.flaggedMailTemplate 
                     : this.plugin.settings.mailTemplate, m) + "\n\n"
             }
@@ -120,7 +124,7 @@ export class MailHandler {
         return this.formatMails(await this.getMailsForAllFolders(), as_tasks)
     }
 
-    dueFilter = (m:any) => { 
+    dueFilter = (m:Message) => { 
         return (m?.flag?.dueDateTime?.dateTime !== undefined) 
             ? moment.utc(m.flag.dueDateTime.dateTime) <= moment() 
             : true 
