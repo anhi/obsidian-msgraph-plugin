@@ -41,6 +41,8 @@ const context = await esbuild.context({
 		'@codemirror/text',
 		'@codemirror/tooltip',
 		'@codemirror/view',
+		'fetch',
+		'encoding',
 		...builtins],
 	format: 'cjs',
 	target: 'es2018',
