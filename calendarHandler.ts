@@ -79,7 +79,7 @@ export class CalendarHandler {
 
 	getEventsForToday = async () => {
 		const today = DateTime.now().startOf('day')
-		const tomorrow = DateTime.now().plus({days: 1}).endOf('day')
+		const tomorrow = DateTime.now().endOf('day')
 		
 		return await this.getEventsForTimeRange(today, tomorrow)
 	}
