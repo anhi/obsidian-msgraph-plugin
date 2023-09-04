@@ -1,11 +1,11 @@
 {
 	"name": "obsidian-msgraph-plugin",
-	"version": "0.9.4",
+	"version": "0.9.5",
 	"description": "This plugin allows to query MSGraph from obsidian.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"build": "cd node_modules/fetch && npm i && cd ../../ && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"postinstall": "patch-package"
 	},

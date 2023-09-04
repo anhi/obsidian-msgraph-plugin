@@ -1,0 +1,13 @@
+diff --git a/node_modules/fetch/package.json b/node_modules/fetch/package.json
+index d9698ad..665d173 100644
+--- a/node_modules/fetch/package.json
++++ b/node_modules/fetch/package.json
+@@ -15,7 +15,7 @@
+   "license": "MIT",
+   "dependencies": {
+     "biskviit": "1.0.1",
+-    "encoding": "0.1.12"
++    "encoding": "0.1.13"
+   },
+   "devDependencies": {
+     "chai": "^3.5.0",
