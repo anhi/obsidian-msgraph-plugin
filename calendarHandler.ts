@@ -29,7 +29,7 @@ export class CalendarHandler {
 			if (authProvider.account.type == "MSGraph") {
 				const graphClient = this.plugin.getGraphClient(authProvider)
 
-				const dateQuery = `startDateTime=${start.toISODate()}&endDateTime=${end.toISODate()}`;
+				const dateQuery = `startDateTime=${start.toISO()}&endDateTime=${end.toISO()}`;
 				
 				const events = await graphClient
 					.api('/me/calendarView').query(dateQuery)
