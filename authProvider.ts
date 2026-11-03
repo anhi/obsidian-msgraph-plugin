@@ -10,6 +10,8 @@ import { AuthenticationProvider, Client } from '@microsoft/microsoft-graph-clien
 import { App, Notice, ObsidianProtocolData } from 'obsidian'
 
 import { getScopes, normalizeEwsBaseUri, redirectUri, validateAuthority } from './authConfig'
+import { LoginModal } from './loginModal'
+import { ObsidianNetworkClient } from './networkClient'
 import { ObsidianTokenCachePlugin } from './ObsidianTokenCachePlugin'
 import type { MSGraphAccount } from './types'
 
@@ -26,6 +28,20 @@ interface PendingLogin {
     reject: (error: Error) => void
 }
 
+export interface AuthProviderCallbacks {
+    /** Called after every successful interactive sign-in with the signed-in user name. */
+    onSignedIn?: (username: string) => void
+}
+
+const describeError = (error: unknown): string => {
+    if (error instanceof AuthError) {
+        // Entra ID error messages look like "AADSTS50173: The provided grant has expired ... Trace ID: ..."
+        const message = (error.errorMessage || '').split(/\r?\n/)[0].replace(/\s*Trace ID:.*$/, '')
+        return [error.errorCode, error.subError, message].filter(Boolean).join(': ')
+    }
+    return error instanceof Error ? error.message : String(error)
+}
+
 export class MSALAuthProvider implements AuthenticationProvider {
     readonly msalClient: PublicClientApplication | ConfidentialClientApplication
     readonly cachePlugin: ObsidianTokenCachePlugin
@@ -35,11 +51,19 @@ export class MSALAuthProvider implements AuthenticationProvider {
     private readonly scopes: string[]
     private pendingLogin: PendingLogin | null = null
     private loginPromise: Promise<string> | null = null
+    private loginModal: LoginModal | null = null
+    /** Why the last silent token acquisition failed (shown in the login dialog). */
+    private lastSilentError: string | null = null
 
     /**
      * @throws Error if the account configuration is invalid
      */
-    constructor(app: App, readonly account: MSGraphAccount, clientSecret: string | null) {
+    constructor(
+        private readonly app: App,
+        readonly account: MSGraphAccount,
+        clientSecret: string | null,
+        private readonly callbacks: AuthProviderCallbacks = {},
+    ) {
         if (!account.displayName.trim()) throw new Error("Account has no display name")
         if (!account.clientId.trim()) throw new Error("Account has no client ID")
         if (account.type === "EWS") normalizeEwsBaseUri(account.baseUri)
@@ -52,12 +76,25 @@ export class MSALAuthProvider implements AuthenticationProvider {
             authority: validateAuthority(account.authority),
         }
         const cache = { cachePlugin: this.cachePlugin }
+        const system = { networkClient: new ObsidianNetworkClient() }
 
         this.msalClient = clientSecret
-            ? new ConfidentialClientApplication({ auth: { ...auth, clientSecret }, cache })
-            : new PublicClientApplication({ auth, cache })
+            ? new ConfidentialClientApplication({ auth: { ...auth, clientSecret }, cache, system })
+            : new PublicClientApplication({ auth, cache, system })
 
         this.graphClient = Client.initWithMiddleware({ authProvider: this })
+    }
+
+    /** Human readable description of the service this account accesses. */
+    get serviceDescription(): string {
+        if (this.account.type === "EWS") {
+            try {
+                return `Exchange (EWS) at ${new URL(this.account.baseUri).host}`
+            } catch {
+                return "Exchange (EWS)"
+            }
+        }
+        return "Microsoft 365 (Microsoft Graph)"
     }
 
     isInitialized = (): boolean => {
@@ -71,17 +108,21 @@ export class MSALAuthProvider implements AuthenticationProvider {
      */
     getTokenSilently = async (): Promise<string | null> => {
         const accounts = await this.msalClient.getTokenCache().getAllAccounts()
-        if (accounts.length === 0) return null
+        if (accounts.length === 0) {
+            this.lastSilentError = null
+            return null
+        }
 
         try {
             const result = await this.msalClient.acquireTokenSilent({ account: accounts[0], scopes: this.scopes })
+            this.lastSilentError = null
             return result?.accessToken || null
         } catch (error) {
             if (error instanceof AuthError && NETWORK_ERROR_CODES.has(error.errorCode)) {
                 throw error
             }
-            console.warn(`MSGraph: silent token acquisition for "${this.account.displayName}" failed`,
-                error instanceof AuthError ? error.errorCode : error)
+            this.lastSilentError = describeError(error)
+            console.warn(`MSGraph: silent token acquisition for "${this.account.displayName}" failed: ${this.lastSilentError}`, error)
             return null
         }
     }
@@ -100,12 +141,17 @@ export class MSALAuthProvider implements AuthenticationProvider {
             this.loginPromise = this.interactiveLogin().finally(() => {
                 this.pendingLogin = null
                 this.loginPromise = null
+                this.loginModal?.finish()
+                this.loginModal = null
             })
         }
         return this.loginPromise
     }
 
     private async interactiveLogin(): Promise<string> {
+        const cachedAccounts = await this.msalClient.getTokenCache().getAllAccounts()
+        const knownUsername = cachedAccounts[0]?.username || this.account.lastUsername || undefined
+
         // fresh PKCE codes and an unguessable state for every login attempt
         const { verifier, challenge } = await this.crypto.generatePkceCodes()
         const state = this.crypto.createNewGuid()
@@ -113,7 +159,8 @@ export class MSALAuthProvider implements AuthenticationProvider {
         const authCodeUrl = await this.msalClient.getAuthCodeUrl({
             scopes: this.scopes,
             redirectUri,
-            prompt: "select_account",
+            // with a known user, let the sign-in page preselect it; otherwise always show the account picker
+            ...(knownUsername ? { loginHint: knownUsername } : { prompt: "select_account" }),
             state,
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
@@ -123,18 +170,39 @@ export class MSALAuthProvider implements AuthenticationProvider {
         const result = new Promise<AuthenticationResult>((resolve, reject) => {
             this.pendingLogin = { state, verifier, resolve, reject }
             timer = window.setTimeout(
-                () => reject(new Error(`Login for "${this.account.displayName}" timed out`)),
+                () => reject(new Error(`Sign-in for "${this.account.displayName}" timed out`)),
                 LOGIN_TIMEOUT_MS
             )
         })
 
-        new Notice(`MSGraph: please sign in to "${this.account.displayName}" in your browser.`)
-        // Obsidian opens external URLs in the system browser
-        window.open(authCodeUrl)
+        this.loginModal = new LoginModal(
+            this.app,
+            {
+                displayName: this.account.displayName,
+                service: this.serviceDescription,
+                username: knownUsername,
+                reason: this.lastSilentError ?? undefined,
+            },
+            // Obsidian opens external URLs in the system browser
+            () => window.open(authCodeUrl),
+            () => this.pendingLogin?.reject(new Error(`Sign-in for "${this.account.displayName}" was cancelled`)),
+        )
+        this.loginModal.open()
 
         try {
             const response = await result
             await this.removeOtherAccounts(response.account)
+
+            const username = response.account?.username
+            if (username) {
+                if (knownUsername && username.toLowerCase() !== knownUsername.toLowerCase()) {
+                    new Notice(`MSGraph: "${this.account.displayName}" is now signed in as ${username} (previously ${knownUsername}).`, 10000)
+                } else {
+                    new Notice(`MSGraph: "${this.account.displayName}" signed in as ${username}.`)
+                }
+                this.callbacks.onSignedIn?.(username)
+            }
+            this.lastSilentError = null
             return response.accessToken
         } finally {
             window.clearTimeout(timer)
@@ -168,7 +236,9 @@ export class MSALAuthProvider implements AuthenticationProvider {
             redirectUri,
             scopes: this.scopes,
             clientInfo: typeof query.client_info === 'string' ? query.client_info : undefined,
-        }).then(pending.resolve, pending.reject)
+        }).then(pending.resolve, (error) => pending.reject(new Error(
+            `Sign-in for "${this.account.displayName}" failed: ${describeError(error)}`
+        )))
 
         return true
     }
@@ -186,8 +256,10 @@ export class MSALAuthProvider implements AuthenticationProvider {
 
     /** Cancel a pending login. */
     dispose = (): void => {
-        this.pendingLogin?.reject(new Error("Login cancelled"))
+        this.pendingLogin?.reject(new Error("Sign-in cancelled"))
         this.pendingLogin = null
+        this.loginModal?.finish()
+        this.loginModal = null
     }
 
     /** Cancel a pending login and remove all cached tokens of this account. */

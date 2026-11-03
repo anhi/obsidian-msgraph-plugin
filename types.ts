@@ -19,6 +19,8 @@ export class MSGraphAccount {
     enabled        = false
     type: AccountType = "MSGraph"
     baseUri        = ""
+    /** User name of the last successful sign-in (used as login hint and shown in the settings). */
+    lastUsername   = ""
 }
 
 export type EventWithProvider = MicrosoftGraph.Event & {provider: string}

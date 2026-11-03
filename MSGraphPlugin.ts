@@ -40,7 +40,14 @@ export default class MSGraphPlugin extends Plugin {
 
 			this.msalProviders.get(account.displayName)?.dispose()
 
-			const provider = new MSALAuthProvider(this.app, account, clientSecret)
+			const provider = new MSALAuthProvider(this.app, account, clientSecret, {
+				onSignedIn: (username) => {
+					if (account.lastUsername !== username) {
+						account.lastUsername = username
+						void this.saveSettings()
+					}
+				},
+			})
 			this.msalProviders.set(account.displayName, provider)
 			return provider
 		} catch (e) {

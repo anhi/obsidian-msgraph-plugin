@@ -106,7 +106,7 @@ export class MSGraphPluginSettingsTab extends PluginSettingTab {
 				div.addClass("msgraph_div");
 
 				const title = this.containerEl.createEl("h4", {
-					text: "Account #" + index,
+					text: `Account #${index}` + (account.lastUsername ? ` (${account.lastUsername})` : ""),
 				});
 				title.addClass("msgraph_title");
 

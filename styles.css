@@ -91,3 +91,7 @@
     margin-right: 5px;
     width: 10%;
 }
+.msgraph_login_reason {
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+}
