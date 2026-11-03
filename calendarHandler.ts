@@ -1,126 +1,132 @@
-import MSGraphPlugin from "MSGraphPlugin";
-import { htmlToMarkdown } from "obsidian";
-import { EventWithProvider } from "types";
-
+import { Notice } from "obsidian"
 import { Event } from '@microsoft/microsoft-graph-types'
+import { DateTime } from "luxon"
+import {
+	AppointmentSchema,
+	CalendarFolder,
+	CalendarView,
+	DateTime as EWSDateTime,
+	ExchangeService,
+	OAuthCredentials,
+	PropertySet,
+	Uri,
+	WellKnownFolderName,
+} from "ews-javascript-api"
 
-import { DateTime } from "luxon";
+import type MSGraphPlugin from "./MSGraphPlugin"
+import type { MSALAuthProvider } from "./authProvider"
+import { normalizeEwsBaseUri } from "./authConfig"
+import { eta, templateHelpers } from "./templating"
+import { EventWithProvider } from "./types"
+import { errorMessage, getAllPages } from "./util"
 
-// @ts-ignore
-import * as Eta from './node_modules/eta/dist/browser.module.mjs'
-import { AppointmentSchema, BasePropertySet, CalendarFolder, CalendarView, DateTime as EWSDateTime, EmailMessageSchema, EwsLogging, ExchangeService, FolderId, ItemView, Mailbox, OAuthCredentials, PropertySet, Uri, WellKnownFolderName } from "ews-javascript-api"
+/** Upper bound for the number of events fetched per account and time range. */
+const MAX_EVENTS = 1000
 
 export class CalendarHandler {
-    plugin:MSGraphPlugin
-	eta:Eta.Eta
+	plugin: MSGraphPlugin
 
-    constructor(plugin:MSGraphPlugin) {
-        this.plugin = plugin
-		this.eta = new Eta.Eta()
-    }
+	constructor(plugin: MSGraphPlugin) {
+		this.plugin = plugin
+	}
 
-    getEventsForTimeRange = async (start:DateTime, end:DateTime):Promise<Record<string, [Event]>> => {
-		const events_by_provider:Record<string, [Event]> = {}
+	private getGraphEvents = async (authProvider: MSALAuthProvider, start: DateTime, end: DateTime): Promise<Event[]> => {
+		const graphClient = authProvider.graphClient
+		const dateQuery = `startDateTime=${encodeURIComponent(start.toISO() ?? "")}&endDateTime=${encodeURIComponent(end.toISO() ?? "")}`
 
-		// todo: fetch in parallel using Promise.all()?
-		for (const authProviderName in this.plugin.msalProviders) {
-			const authProvider = this.plugin.msalProviders[authProviderName]
+		const request = graphClient
+			.api('/me/calendarView').query(dateQuery)
+			.orderby(`start/DateTime`)
+			.top(100)
 
-			if (authProvider.account.type == "MSGraph") {
-				const graphClient = this.plugin.getGraphClient(authProvider)
+		return getAllPages<Event>(graphClient, request, MAX_EVENTS)
+	}
 
-				const dateQuery = `startDateTime=${encodeURIComponent(start.toISO())}&endDateTime=${encodeURIComponent(end.toISO())}`;
-				
-				const events = await graphClient
-					.api('/me/calendarView').query(dateQuery)
-					//.select('subject,start,end')
-					.orderby(`start/DateTime`)
-					.get();
+	private getEwsEvents = async (authProvider: MSALAuthProvider, start: DateTime, end: DateTime): Promise<Event[]> => {
+		const baseUri = normalizeEwsBaseUri(authProvider.account.baseUri)
+		const token = await authProvider.getAccessToken()
 
-				events_by_provider[authProviderName] = events.value
-			} else if (authProvider.account.type == "EWS") {
-				const authProvider = this.plugin.msalProviders[authProviderName]
+		const svc = new ExchangeService()
+		svc.Url = new Uri(`${baseUri}/EWS/Exchange.asmx`)
+		svc.Credentials = new OAuthCredentials(token)
 
-				const token = await authProvider.getAccessToken()
+		// Initialize the calendar folder object with only the folder ID.
+		const calendar = await CalendarFolder.Bind(svc, WellKnownFolderName.Calendar, new PropertySet())
 
-				const svc = new ExchangeService();
-				//EwsLogging.DebugLogEnabled = true; // false to turnoff debugging. 
-				svc.Url = new Uri(`${authProvider.account.baseUri}/EWS/Exchange.asmx`);
-				
-				svc.Credentials = new OAuthCredentials(token);
+		const calendarView = new CalendarView(new EWSDateTime(start.toMillis()), new EWSDateTime(end.toMillis()), MAX_EVENTS)
 
-				// Initialize values for the start and end times, and the number of appointments to retrieve.
-				
-				// Initialize the calendar folder object with only the folder ID. 
-				const calendar = await CalendarFolder.Bind(svc, WellKnownFolderName.Calendar, new PropertySet());
+		// Limit the properties returned to the appointment's subject, start time, and end time.
+		calendarView.PropertySet = new PropertySet(AppointmentSchema.Subject, AppointmentSchema.Start, AppointmentSchema.End, AppointmentSchema.IsAllDayEvent)
+		const appointments = await calendar.FindAppointments(calendarView)
 
-				// Set the start and end time and number of appointments to retrieve.
-				const calendarView = new CalendarView(new EWSDateTime(start.toMillis()), new EWSDateTime(end.toMillis()));
-				
-				// Limit the properties returned to the appointment's subject, start time, and end time.
-				calendarView.PropertySet = new PropertySet(AppointmentSchema.Subject, AppointmentSchema.Start, AppointmentSchema.End, AppointmentSchema.IsAllDayEvent);
-				// Retrieve a collection of appointments by using the calendar view.
-				const appointments = await calendar.FindAppointments(calendarView);
+		return appointments.Items.map(({ Subject, Start, End, IsAllDayEvent }) => ({
+			subject: Subject,
+			start: {dateTime: Start.ToISOString()},
+			end: {dateTime: End.ToISOString()},
+			isAllDay: IsAllDayEvent,
+		} as Event))
+	}
 
-				const results = appointments.Items.map(({ Subject, Start, End, IsAllDayEvent }) => (
-					{
-						subject: Subject, 
-						start: {dateTime: Start.ToISOString()}, 
-						end: {dateTime: End.ToISOString()}, 
-						isAllDay: IsAllDayEvent 
-					} as Event)) as [Event];
-				
-				events_by_provider[authProviderName] = results
+	/**
+	 * Fetches the events of all enabled accounts. Accounts that fail are reported and skipped.
+	 */
+	getEventsForTimeRange = async (start: DateTime, end: DateTime): Promise<Record<string, Event[]>> => {
+		const eventsByProvider: Record<string, Event[]> = {}
+
+		for (const [name, authProvider] of this.plugin.msalProviders) {
+			if (!authProvider.account.enabled) continue
+			try {
+				eventsByProvider[name] = authProvider.account.type === "EWS"
+					? await this.getEwsEvents(authProvider, start, end)
+					: await this.getGraphEvents(authProvider, start, end)
+			} catch (e) {
+				new Notice(`MSGraph: could not fetch events for "${name}": ${errorMessage(e)}`)
+				console.error(e)
 			}
 		}
 
-		return events_by_provider
+		return eventsByProvider
 	}
 
 	getEventsForToday = async () => {
-		const today = DateTime.now().startOf('day')
-		const tomorrow = DateTime.now().endOf('day')
-		
-		return await this.getEventsForTimeRange(today, tomorrow)
+		return await this.getEventsForTimeRange(DateTime.now().startOf('day'), DateTime.now().endOf('day'))
 	}
 
-	flattenAndSortEventsByStartTime = (events_by_provider:Record<string, [Event]>) => {
-		const result:Array<EventWithProvider> = []
-		for (const provider in events_by_provider) {
-			for (const event of events_by_provider[provider]) {
-				event.subject = htmlToMarkdown(event.subject)
-				result.push({...event, provider: provider})
+	flattenAndSortEventsByStartTime = (eventsByProvider: Record<string, Event[]>): EventWithProvider[] => {
+		const result: EventWithProvider[] = []
+		for (const provider in eventsByProvider) {
+			for (const event of eventsByProvider[provider]) {
+				result.push({...event, provider})
 			}
 		}
 
-		result.sort((a,b):number => {
-			const at = DateTime.fromISO(a.start.dateTime, {zone: a.start.timeZone})
-			const bt = DateTime.fromISO(b.start.dateTime, {zone: b.start.timeZone})
+		const startMillis = (e: Event): number => {
+			const dateTime = e.start?.dateTime ?? ""
+			let dt = DateTime.fromISO(dateTime, {zone: e.start?.timeZone ?? undefined})
+			if (!dt.isValid) dt = DateTime.fromISO(dateTime, {zone: "utc"})
+			return dt.isValid ? dt.toMillis() : 0
+		}
 
-			return at.toMillis() - bt.toMillis()
-		})
-
-		return result
+		return result.sort((a, b) => startMillis(a) - startMillis(b))
 	}
 
-	formatEvents = (events:Record<string,[Event]>):string => {
+	formatEvents = (events: Record<string, Event[]>): string => {
 		let result = ""
 
-		const flat_events = this.flattenAndSortEventsByStartTime(events)
-
-		try {
-			for (const e of flat_events) {
-				console.log(e)
-				result += this.eta.renderString(this.plugin.settings.eventTemplate, {...e,  luxon:DateTime }) + "\n\n"
+		for (const e of this.flattenAndSortEventsByStartTime(events)) {
+			try {
+				result += eta.renderString(this.plugin.settings.eventTemplate, {...e, ...templateHelpers, luxon: DateTime}) + "\n\n"
+			} catch (err) {
+				new Notice(`MSGraph: error in event template: ${errorMessage(err)}`)
+				console.error(err)
+				break
 			}
-		} catch (e) {
-			console.error(e)
 		}
 
 		return result
 	}
 
-    formatEventsForToday = async () => {
-        return this.formatEvents(await this.getEventsForToday())
-    }
+	formatEventsForToday = async () => {
+		return this.formatEvents(await this.getEventsForToday())
+	}
 }

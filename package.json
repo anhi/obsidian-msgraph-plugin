@@ -5,37 +5,36 @@
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
-		"build": "cd node_modules/fetch && npm i && cd ../../ && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"version": "node version-bump.mjs && git add manifest.json versions.json",
-		"postinstall": "patch-package"
+		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"lint": "eslint --ext .ts .",
+		"version": "node version-bump.mjs && git add manifest.json versions.json"
 	},
 	"keywords": [],
-	"author": "",
+	"author": "Andreas Hildebrandt",
 	"license": "MIT",
 	"devDependencies": {
-		"@microsoft/microsoft-graph-types": "^2.38.0",
-		"@types/luxon": "^3.3.1",
-		"@types/node": "^20.5.0",
-		"@typescript-eslint/eslint-plugin": "^6.3.0",
-		"@typescript-eslint/parser": "^6.3.0",
+		"@microsoft/microsoft-graph-types": "^2.43.1",
+		"@types/luxon": "^3.7.6",
+		"@types/node": "^22.10.0",
+		"@typescript-eslint/eslint-plugin": "^6.21.0",
+		"@typescript-eslint/parser": "^6.21.0",
 		"builtin-modules": "^3.3.0",
-		"electron": "^25.5.0",
-		"esbuild": "0.19.2",
-		"obsidian": "latest",
-		"patch-package": "^8.0.0",
-		"tslib": "2.6.1",
-		"typescript": "5.1.6"
+		"esbuild": "^0.25.0",
+		"eslint": "^8.57.1",
+		"obsidian": "1.14.4",
+		"tslib": "^2.8.1",
+		"typescript": "~5.8.3"
 	},
 	"dependencies": {
-		"@azure/identity": "^3.3.0",
-		"@azure/msal-node": "^2.0.1",
-		"@azure/msal-node-extensions": "^1.0.1",
-		"@electron/remote": "^2.0.10",
-		"@microsoft/microsoft-graph-client": "^3.0.5",
-		"eta": "^3.1.0",
-		"ews-javascript-api": "^0.12.0",
-		"iconv-lite": "^0.6.2",
-		"luxon": "^3.4.0",
-		"fetch-ah": "git://git@github.com/anhi/andris9_fetch.git"
+		"@azure/msal-node": "^7.1.2",
+		"@microsoft/microsoft-graph-client": "^3.0.7",
+		"eta": "^4.6.0",
+		"ews-javascript-api": "0.12.0",
+		"luxon": "^3.7.2"
+	},
+	"overrides": {
+		"fetch": {
+			"encoding": "0.1.13"
+		}
 	}
 }

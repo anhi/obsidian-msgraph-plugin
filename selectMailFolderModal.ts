@@ -1,20 +1,20 @@
 import { MailFolder } from "@microsoft/microsoft-graph-types";
-import MSGraphPlugin from "MSGraphPlugin";
 import { App, FuzzySuggestModal, Notice } from "obsidian";
 
+import type MSGraphPlugin from "./MSGraphPlugin";
+
 export class SelectMailFolderModal extends FuzzySuggestModal<MailFolder> {
-  app:App
-  plugin:MSGraphPlugin
-  folders:MailFolder[]
-  
-  constructor(app:App, plugin:MSGraphPlugin) {
+  plugin: MSGraphPlugin
+  folders: MailFolder[] = []
+
+  constructor(app: App, plugin: MSGraphPlugin) {
     super(app);
 
-    this.app = app
     this.plugin = plugin
+    this.setPlaceholder("Select a mail folder")
   }
 
-  setFolders = (folders:MailFolder[]) => {
+  setFolders = (folders: MailFolder[]) => {
     this.folders = folders
   }
 
@@ -23,7 +23,7 @@ export class SelectMailFolderModal extends FuzzySuggestModal<MailFolder> {
   }
 
   getItemText(f: MailFolder): string {
-    return f.displayName;
+    return f.displayName ?? f.id ?? "";
   }
 
   onChooseItem(f: MailFolder, evt: MouseEvent | KeyboardEvent) {

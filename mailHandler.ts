@@ -1,144 +1,152 @@
-import { MailFolder, Message, OutlookItem } from "@microsoft/microsoft-graph-types"
-import { MSALAuthProvider } from "authProvider"
-import MSGraphPlugin from "MSGraphPlugin"
-import { SelectMailFolderModal } from "selectMailFolderModal"
+import { MailFolder, Message } from "@microsoft/microsoft-graph-types"
+import { moment, Notice } from "obsidian"
 
-// @ts-ignore
-import * as Eta from './node_modules/eta/dist/browser.module.mjs'
+import type { MSALAuthProvider } from "./authProvider"
+import type MSGraphPlugin from "./MSGraphPlugin"
+import { SelectMailFolderModal } from "./selectMailFolderModal"
+import { eta, templateHelpers } from "./templating"
+import { MSGraphMailFolderAccess } from "./types"
+import { errorMessage, getAllPages } from "./util"
 
-import { MSGraphMailFolderAccess } from "types"
-import moment from "moment"
-
+/** Graph allows at most 1000 messages per page. */
+const MAX_MAILS = 1000
 
 export class MailHandler {
-    plugin:MSGraphPlugin
-	eta:Eta.Eta
+	plugin: MSGraphPlugin
 
-    constructor(plugin:MSGraphPlugin) {
-        this.plugin = plugin
-		this.eta = new Eta.Eta()
-    }
+	constructor(plugin: MSGraphPlugin) {
+		this.plugin = plugin
+	}
 
-    getMailFolders = async (authProvider: MSALAuthProvider, limit=250):Promise<MailFolder[]> => {
+	getMailFolders = async (authProvider: MSALAuthProvider, limit=250): Promise<MailFolder[]> => {
 		// this could be so much simpler, if we wouldn't support self-hosted exchange installations...
 		// otherwise, we could just query https://graph.microsoft.com/v1.0/me/mailfolders/delta?$select=displayname
 		// and would be done...
-		const graphClient = this.plugin.getGraphClient(authProvider)
+		const graphClient = authProvider.graphClient
 
-		const getChildFoldersRecursive = async (fs:Array<MailFolder>): Promise<MailFolder[]> => {
-			let result:Array<MailFolder> = []
-			
-			for (const f of fs) {
-				const request = graphClient
-					.api(`/me/mailfolders/${f.id}/childFolders?includeHiddenFolders=true`)
-					.select("displayName,childFolderCount")
-					.top(limit)
+		const listFolders = (path: string) => getAllPages<MailFolder>(
+			graphClient,
+			graphClient.api(path).query("includeHiddenFolders=true").select("displayName,childFolderCount").top(limit),
+			10000
+		)
 
-				const childFolders = (await request.get()).value
+		const getChildFoldersRecursive = async (parents: MailFolder[]): Promise<MailFolder[]> => {
+			let result: MailFolder[] = []
 
-				result = result.concat(childFolders)
+			for (const parent of parents) {
+				if (!parent.id) continue
+				const childFolders = await listFolders(`/me/mailFolders/${encodeURIComponent(parent.id)}/childFolders`)
+				const grandChildren = await getChildFoldersRecursive(childFolders.filter((f) => (f.childFolderCount ?? 0) > 0))
 
-				const remainingChildFolders = childFolders.filter((f:MailFolder) => f.childFolderCount > 0)
-				const remainingGrandChildren = await getChildFoldersRecursive(remainingChildFolders)
-
-				result = result.concat(remainingChildFolders).concat(remainingGrandChildren)
+				result = result.concat(childFolders, grandChildren)
 			}
 
 			return result
 		}
 
-		let request = graphClient
-			.api("/me/mailfolders?includeHiddenFolders=true")
-			.select("displayName,childFolderCount")
-			.top(limit)
-		
-		let root_folders = (await request.get()).value
+		const rootFolders = await listFolders("/me/mailFolders")
+		let folders = rootFolders.concat(await getChildFoldersRecursive(rootFolders.filter((f) => (f.childFolderCount ?? 0) > 0)))
 
-		root_folders = root_folders.concat(await getChildFoldersRecursive(root_folders.filter((f:MailFolder) => f.childFolderCount > 0)))
+		try {
+			folders = folders.concat(await listFolders("/me/mailFolders/searchfolders/childFolders"))
+		} catch (e) {
+			// not every mailbox has a search folder root
+			console.info("MSGraph: could not list search folders", e)
+		}
 
-		request = graphClient
-			.api("/me/mailFolders/searchfolders/childFolders")
-			.select("displayName,childFolderCount")
-			.top(limit)
-
-		root_folders = root_folders.concat((await request.get()).value)
-
-		return root_folders
+		return folders
 	}
 
-	selectMailFolder = async (account:string) => {
-		const selector = new SelectMailFolderModal(this.plugin.app, this.plugin)
+	selectMailFolder = async (account: string) => {
+		const authProvider = this.plugin.msalProviders.get(account)
+		if (!authProvider) throw new Error(`Account "${account}" is not enabled`)
 
-		const folders = await this.getMailFolders(this.plugin.msalProviders[account])
-		selector.setFolders(folders)
+		const selector = new SelectMailFolderModal(this.plugin.app, this.plugin)
+		selector.setFolders(await this.getMailFolders(authProvider))
 		selector.open()
 	}
 
-	getMailsForFolder = async (mf: MSGraphMailFolderAccess) => {
-        const authProvider = this.plugin.msalProviders[mf.provider]
+	getMailsForFolder = async (mf: MSGraphMailFolderAccess): Promise<Message[]> => {
+		const authProvider = this.plugin.msalProviders.get(mf.provider)
+		if (!authProvider) throw new Error(`account "${mf.provider}" is not enabled`)
 
-        const graphClient = this.plugin.getGraphClient(authProvider)
+		const folderId = mf.id.trim()
+		if (!folderId) throw new Error("no mail folder selected")
 
-		let request = graphClient.api(`/me/mailFolders/${mf.id}/messages`)
+		const graphClient = authProvider.graphClient
+		let request = graphClient.api(`/me/mailFolders/${encodeURIComponent(folderId)}/messages`)
 
-		if (mf.query !== undefined)
-			request = request.query(mf.query)
+		if (mf.query?.trim())
+			request = request.query(mf.query.trim())
 
-		if (mf.limit !== undefined)
-			request = request.top(mf.limit)
+		const limit = (Number.isInteger(mf.limit) && mf.limit > 0) ? Math.min(mf.limit, MAX_MAILS) : 100
+		request = request.top(limit)
 
-        if (mf.onlyFlagged)
-            request = request.filter('flag/flagStatus eq \'flagged\'')
+		if (mf.onlyFlagged)
+			request = request.filter('flag/flagStatus eq \'flagged\'')
 
-		return (await request.get()).value
+		return getAllPages<Message>(graphClient, request, limit)
 	}
 
-    getMailsForAllFolders = async () => {
-        const mails:Record<string, OutlookItem[]> = {}
-        for (const mf of this.plugin.settings.mailFolders) {
-            mails[mf.displayName] = await this.getMailsForFolder(mf)
-        }
+	/**
+	 * Fetches the mails of all configured folders. Folders that fail are reported and skipped,
+	 * folders without account or folder id are ignored.
+	 */
+	getMailsForAllFolders = async (): Promise<Record<string, Message[]>> => {
+		const mails: Record<string, Message[]> = {}
+		for (const mf of this.plugin.settings.mailFolders) {
+			if (!mf.provider || mf.provider === "invalid" || !mf.id.trim()) continue
 
-        return mails
-    }
+			const name = mf.displayName || mf.id
+			try {
+				mails[name] = (mails[name] ?? []).concat(await this.getMailsForFolder(mf))
+			} catch (e) {
+				new Notice(`MSGraph: could not fetch mails for "${name}": ${errorMessage(e)}`)
+				console.error(e)
+			}
+		}
 
-	formatMails = (mails:Record<string, unknown[]>, as_tasks=false):string => {
+		return mails
+	}
+
+	formatMails = (mails: Record<string, unknown[]>, as_tasks=false): string => {
 		let result = ""
+		const template = as_tasks ? this.plugin.settings.flaggedMailTemplate : this.plugin.settings.mailTemplate
 
-        for (const folder in mails) {
-            result += `# ${folder}\n\n`
+		try {
+			for (const folder in mails) {
+				result += `# ${folder}\n\n`
 
-            for (const m of mails[folder]) {
-                result += this.eta.renderString(as_tasks
-                    ? this.plugin.settings.flaggedMailTemplate 
-                    : this.plugin.settings.mailTemplate, m) + "\n\n"
-            }
-   
-            result += "\n"
-        }
+				for (const m of mails[folder]) {
+					result += eta.renderString(template, {...(m as object), ...templateHelpers}) + "\n\n"
+				}
+
+				result += "\n"
+			}
+		} catch (e) {
+			new Notice(`MSGraph: error in mail template: ${errorMessage(e)}`)
+			console.error(e)
+		}
 
 		return result
 	}
 
-    formatMailsForAllFolders = async (as_tasks=false): Promise<string> => {
-        return this.formatMails(await this.getMailsForAllFolders(), as_tasks)
-    }
+	formatMailsForAllFolders = async (as_tasks=false): Promise<string> => {
+		return this.formatMails(await this.getMailsForAllFolders(), as_tasks)
+	}
 
-    dueFilter = (m:Message) => { 
-        return (m?.flag?.dueDateTime?.dateTime !== undefined) 
-            ? moment.utc(m.flag.dueDateTime.dateTime) <= moment() 
-            : true 
-    }
+	dueFilter = (m: Message): boolean => {
+		const due = m?.flag?.dueDateTime?.dateTime
+		return due ? moment.utc(due).valueOf() <= Date.now() : true
+	}
 
-    formatOverdueMailsForAllFolders = async (): Promise<string> => {
-        const ms = await this.getMailsForAllFolders()
+	formatOverdueMailsForAllFolders = async (): Promise<string> => {
+		const ms = await this.getMailsForAllFolders()
 
-        for (const folder in ms) {
-            if (ms[folder].length > 0) {
-                ms[folder] = ms[folder].filter(this.dueFilter)
-            }
-        }
+		for (const folder in ms) {
+			ms[folder] = ms[folder].filter(this.dueFilter)
+		}
 
-        return this.formatMails(ms, true)
-    }
+		return this.formatMails(ms, true)
+	}
 }

@@ -2,7 +2,7 @@
 	"id": "obsidian-msgraph-plugin",
 	"name": "MSGraph Plugin",
 	"version": "0.9.9",
-	"minAppVersion": "1.8.0",
+	"minAppVersion": "1.11.4",
 	"description": "This plugin allows to query MSGraph from obsidian.",
 	"author": "Andreas Hildebrandt",
 	"authorUrl": "https://github.com/anhi",

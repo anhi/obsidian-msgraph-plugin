@@ -5,6 +5,10 @@ information stored in MS 365.
 
 Currently, the plugin allows to access to calendar items and emails.
 
+### Requirements
+
+Obsidian 1.11.4 or newer (desktop only).
+
 ### Installation
 
 Download the release zip-file and extract it inside the .obsidian/plugins - folder in your Vault. Then, activate the MSGraph
@@ -26,6 +30,10 @@ If you want to use a confidential application, navigate to your application, the
 
 Certificates & secrets => Client secrets => New client secret.
 
+If the sign-in fails with error `AADSTS9002327` ("Tokens issued for the 'Single-Page Application' client-type may only
+be redeemed via cross-origin requests"), add the redirect URI `obsidian://msgraph` under the platform
+"Mobile and desktop applications" instead.
+
 #### Using the Azure CLI
 
 Create the app with
@@ -43,11 +51,27 @@ where you replace {appId} with the value you wrote down in the last step.
 ### Configuring obsidian
 
 Once the application has been registered, you can configure the plugin in Obsidian. Activate the plugin and navigate to its settings. For each account you want to query, add an MSGraph account.
-The display name can be chosen freely, the Client ID corresponds to the appId you wrote down earlier. If you configured a password, use it as the client secret. The default for the authority field
-should work in most cases. Activate the account by switching the toggle to the right.
+The display name can be chosen freely, the Client ID corresponds to the appId you wrote down earlier. If you configured a password, store it in
+Obsidian's keychain (Settings => Keychain) and select it as the client secret of the account. The secret is never written to the plugin's
+`data.json`; secrets stored there by older versions of this plugin are moved to the keychain automatically. The default for the authority field
+should work in most cases. Activate the account by switching the toggle to the right. To change the configuration of an account, deactivate it first
+(this also signs it out).
+
+Login tokens are stored encrypted (using the operating system's keychain) and are specific to the vault.
 
 If you want to access your email, configure Mail Folders in the following section of the settings dialog. Finally, if you want to fine-tune the rendering of events, mails, or tasks, you can change the
 Eta.js - templates in the settings.
+
+#### Templates and security
+
+Mails and calendar invitations can be sent to you by anyone. If their content were inserted into your notes unchanged, a malicious mail
+could, for example, add a `dataviewjs` code block, a Templater command, HTML, or a remote image (tracking pixel) to your note. Therefore:
+
+  - `<%= value %>` escapes Markdown. Use it for everything that comes from a mail or an event (subject, body, sender, ...).
+  - `<%~ value %>` inserts the value unchanged. Only use it for values you produced yourself or already escaped with `it.escapeMarkdown(...)`.
+  - `it.safeUrl(url)` returns the URL only if it is an http(s) URL, for use in Markdown links.
+
+The default templates follow these rules. If you customized a template with an older version of the plugin, please review it.
 
 To use the plugin, open a note, open the Obsidian command palette (CTRL+p or CMD+p), and select one of the MSGraph - functions. Your browser will show a login window and ask for permission to access your data.
 

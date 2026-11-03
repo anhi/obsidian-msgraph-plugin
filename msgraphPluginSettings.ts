@@ -1,11 +1,10 @@
+import { App, ButtonComponent, Notice, PluginSettingTab, SecretComponent, Setting } from 'obsidian'
+import { MailFolder } from '@microsoft/microsoft-graph-types'
 
-import { App, ButtonComponent, Setting } from 'obsidian'
-import { PluginSettingTab } from 'obsidian'
-import MSGraphPlugin from './MSGraphPlugin'
-
-import { MSGraphAccount, MSGraphMailFolderAccess } from 'types';
-import { SelectMailFolderModal } from 'selectMailFolderModal';
-import { MailFolder } from '@microsoft/microsoft-graph-types';
+import type MSGraphPlugin from './MSGraphPlugin'
+import { AccountType, MSGraphAccount, MSGraphMailFolderAccess } from './types'
+import { SelectMailFolderModal } from './selectMailFolderModal'
+import { errorMessage } from './util'
 
 import { defaultEventTemplate } from "./defaultEventTemplate"
 import { defaultMailTemplate } from "./defaultMailTemplate"
@@ -40,211 +39,223 @@ export class MSGraphPluginSettingsTab extends PluginSettingTab {
 
 		containerEl.empty();
 
-		containerEl.createEl('h2', {text: 'Settings for MSGraphPlugin.'});
-
 		this.add_account_setting()
 
 		this.add_mail_settings()
 
-		this.containerEl.createEl("h2", { text: "Templates" });
-		const descHeading = document.createDocumentFragment();
-        descHeading.append(
-			"Templates for converting MSGraph objects to Markdown."
-        );
-        new Setting(this.containerEl).setDesc(descHeading);
+		new Setting(this.containerEl).setName("Templates").setHeading()
+		new Setting(this.containerEl).setDesc(
+			"Eta.js templates for converting MSGraph objects to Markdown. Use <%= … %> for content coming from mails " +
+			"and events: it escapes Markdown, so that a malicious mail or invitation cannot inject links, embeds, HTML " +
+			"or code blocks (e.g. dataviewjs) into your notes. <%~ … %> inserts the value unchanged."
+		)
 
 		this.add_event_template()
 		this.add_mail_template()
 	}
 
+	private setAccountEnabled = async (account: MSGraphAccount, enabled: boolean): Promise<void> => {
+		if (enabled) {
+			const name = account.displayName.trim()
+			if (!name) {
+				new Notice("MSGraph: please enter a display name first.")
+			} else if (this.plugin.settings.accounts.some((a) => a !== account && a.displayName.trim() === name)) {
+				new Notice(`MSGraph: there is already an account called "${name}".`)
+			} else {
+				account.displayName = name
+				account.enabled = this.plugin.registerAccount(account) !== null
+			}
+		} else {
+			account.enabled = false
+			await this.plugin.unregisterAccount(account.displayName)
+		}
+
+		await this.plugin.saveSettings()
+		this.display()
+	}
+
 	add_account_setting(): void {
-        this.containerEl.createEl("h2", { text: "MSGraph Access" });
+		new Setting(this.containerEl).setName("MSGraph Access").setHeading()
 
-        const descHeading = document.createDocumentFragment();
-        descHeading.append(
-			"Each account you want to query MSGraph with needs to be authorized."
-        );
+		new Setting(this.containerEl).setDesc(
+			"Each account you want to query MSGraph with needs to be authorized. " +
+			"Disable an account to change its configuration. Client secrets of confidential applications are " +
+			"kept in Obsidian's keychain, not in the plugin settings."
+		)
 
-        new Setting(this.containerEl).setDesc(descHeading);
+		new Setting(this.containerEl)
+			.setName("Add Account")
+			.setDesc("Add MSGraph Account")
+			.addButton((button: ButtonComponent) => {
+				button
+					.setTooltip("Add additional MSGraph account")
+					.setButtonText("+")
+					.setCta()
+					.onClick(async () => {
+						this.plugin.settings.accounts.push(new MSGraphAccount());
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
 
-        new Setting(this.containerEl)
-            .setName("Add Account")
-            .setDesc("Add MSGraph Account")
-            .addButton((button: ButtonComponent) => {
-                button
-                    .setTooltip("Add additional MSGraph account")
-                    .setButtonText("+")
-                    .setCta()
-                    .onClick(() => {
-                        this.plugin.settings.accounts.push(new MSGraphAccount());
-                        this.plugin.saveSettings();
-                        this.display();
-                    });
-            });
+		this.plugin.settings.accounts.forEach(
+			(account, index) => {
+				const locked = account.enabled
 
-        this.plugin.settings.accounts.forEach(
-            (account, index) => {
 				const div = this.containerEl.createEl("div");
-                div.addClass("msgraph_div");
+				div.addClass("msgraph_div");
 
-                const title = this.containerEl.createEl("h4", {
-                    text: "Account #" + index,
-                });
-                title.addClass("msgraph_title");
-
-                const s = new Setting(this.containerEl)
-				.addExtraButton((extra) => {
-					extra
-						.setIcon("cross")
-						.setTooltip("Delete")
-						.onClick(() => {
-							this.plugin.settings.accounts.splice(
-								index,
-								1
-							);
-							this.plugin.saveSettings();
-							// Force refresh
-							this.display();
-						});
-				})
-				.addText((text) => {
-					const t = text
-						.setPlaceholder("Display Name")
-						.setValue(account.displayName)
-						.onChange((new_value) => {
-							this.plugin.settings.accounts[index].displayName = new_value;
-							this.plugin.saveSettings();
-						});
-					t.inputEl.addClass("msgraph_display_name");
-
-					return t;
-				})
-				.addText((text) => {
-					const t = text
-						.setPlaceholder("Client Id")
-						.setValue(account.clientId)
-						.onChange((new_value) => {
-							this.plugin.settings.accounts[index].clientId = new_value;
-							this.plugin.saveSettings();
-						});
-					t.inputEl.addClass("msgraph_client_id");
-
-					return t;
-				})
-				.addText((text) => {
-					const t = text
-						.setPlaceholder("Client Secret (optional)")
-						.setValue(account.clientSecret)
-						.onChange((new_value) => {
-							this.plugin.settings.accounts[index].clientSecret = new_value;
-							this.plugin.saveSettings();
-						});
-					t.inputEl.addClass("msgraph_client_secret");
-
-					return t;
-				})
-				.addText((text) => {
-					const t = text
-						.setPlaceholder("authority")
-						.setValue(account.authority)
-						.onChange((new_value) => {
-							this.plugin.settings.accounts[index].authority = new_value;
-							this.plugin.saveSettings();
-						});
-					t.inputEl.addClass("msgraph_authority");
-
-					return t;
-				})
-				.addToggle((toggle) => {
-					toggle.setValue(this.plugin.checkProvider(this.plugin.settings.accounts[index].displayName))
-						.setTooltip("Authorize account")
-						.onChange((new_value) => {
-							const account = this.plugin.settings.accounts[index]
-
-							if (new_value) {
-								this.plugin.authenticateAccount(account)
-								account.enabled = true
-							} else {
-								// todo: de-authorize token
-								this.plugin.msalProviders[account.displayName].removeAccessToken()
-								delete this.plugin.msalProviders[account.displayName]
-								account.enabled = false
-							}
-						})
-				})
-				.addDropdown((dropdown) => {
-					dropdown.addOptions(
-						{MSGraph: "MSGraph", EWS: "EWS"}
-					)
-					.setValue(this.plugin.settings.accounts[index].type)
-					.onChange((new_value) => {
-						this.plugin.settings.accounts[index].type = new_value
-						this.plugin.saveSettings()
-					})
-					
-					dropdown.selectEl.addClass("msgraph_provider_type")
-				})
-				.addText((text) => {
-					const t = text
-						.setPlaceholder("EWS URL")
-						.setValue(account.baseUri)
-						.onChange((new_value) => {
-							this.plugin.settings.accounts[index].baseUri = new_value;
-							this.plugin.saveSettings();
-						});
-					t.inputEl.addClass("msgraph_baseuri");
-
-					return t;
-				})
-                
-				s.infoEl.remove();
-				
-                div.appendChild(title);
-                div.appendChild(this.containerEl.lastChild);
-            }
-        );
-    }
-
-	add_mail_settings = (): void => {
-		this.containerEl.createEl("h2", { text: "Mail related settings" });
-
-        const descHeading = document.createDocumentFragment();
-        descHeading.append(
-			"Mail folders you want to access"
-        );
-
-        new Setting(this.containerEl).setDesc(descHeading);
-
-        new Setting(this.containerEl)
-            .setName("Add Mail Folder")
-            .addButton((button: ButtonComponent) => {
-                button
-                    .setTooltip("Add additional mail folder")
-                    .setButtonText("+")
-                    .setCta()
-                    .onClick(() => {
-                        this.plugin.settings.mailFolders.push(new MSGraphMailFolderAccess());
-                        this.plugin.saveSettings();
-                        this.display();
-                    });
-            });
-
-        this.plugin.settings.mailFolders.forEach(
-            (folder, index) => {
-				const div = this.containerEl.createEl("div");
-                div.addClass("msgraph_div");
+				const title = this.containerEl.createEl("h4", {
+					text: "Account #" + index,
+				});
+				title.addClass("msgraph_title");
 
 				const s = new Setting(this.containerEl)
 					.addExtraButton((extra) => {
 						extra
 							.setIcon("cross")
 							.setTooltip("Delete")
-							.onClick(() => {
-								this.plugin.settings.mailFolders.splice(
-									index,
+							.onClick(async () => {
+								if (account.enabled) {
+									await this.plugin.unregisterAccount(account.displayName)
+								}
+								this.plugin.settings.accounts.splice(
+									this.plugin.settings.accounts.indexOf(account),
 									1
 								);
-								this.plugin.saveSettings();
+								await this.plugin.saveSettings();
+								// Force refresh
+								this.display();
+							});
+					})
+					.addText((text) => {
+						const t = text
+							.setPlaceholder("Display Name")
+							.setValue(account.displayName)
+							.setDisabled(locked)
+							.onChange(async (new_value) => {
+								account.displayName = new_value;
+								await this.plugin.saveSettings();
+							});
+						t.inputEl.addClass("msgraph_display_name");
+
+						return t;
+					})
+					.addText((text) => {
+						const t = text
+							.setPlaceholder("Client Id")
+							.setValue(account.clientId)
+							.setDisabled(locked)
+							.onChange(async (new_value) => {
+								account.clientId = new_value.trim();
+								await this.plugin.saveSettings();
+							});
+						t.inputEl.addClass("msgraph_client_id");
+
+						return t;
+					})
+					.addComponent((controlEl) => {
+						// controlEl is shared by all controls of this row, so use a wrapper of our own
+						const wrapper = controlEl.createDiv({ cls: "msgraph_client_secret" })
+						wrapper.setAttribute("aria-label", "Client secret (optional, from keychain)")
+						return new SecretComponent(this.app, wrapper)
+							.setValue(account.clientSecretId)
+							.setDisabled(locked)
+							.onChange(async (new_value) => {
+								account.clientSecretId = new_value ?? "";
+								await this.plugin.saveSettings();
+							})
+					})
+					.addText((text) => {
+						const t = text
+							.setPlaceholder("authority")
+							.setValue(account.authority)
+							.setDisabled(locked)
+							.onChange(async (new_value) => {
+								account.authority = new_value.trim();
+								await this.plugin.saveSettings();
+							});
+						t.inputEl.addClass("msgraph_authority");
+
+						return t;
+					})
+					.addToggle((toggle) => {
+						toggle.setValue(account.enabled)
+							.setTooltip(this.plugin.checkProvider(account.displayName)
+								? "Authorized – disable to sign out"
+								: "Authorize account")
+							.onChange((new_value) => this.setAccountEnabled(account, new_value))
+					})
+					.addDropdown((dropdown) => {
+						dropdown.addOptions(
+							{MSGraph: "MSGraph", EWS: "EWS"}
+						)
+						.setValue(account.type)
+						.setDisabled(locked)
+						.onChange(async (new_value) => {
+							account.type = new_value as AccountType
+							await this.plugin.saveSettings()
+						})
+
+						dropdown.selectEl.addClass("msgraph_provider_type")
+					})
+					.addText((text) => {
+						const t = text
+							.setPlaceholder("EWS URL (https://…)")
+							.setValue(account.baseUri)
+							.setDisabled(locked)
+							.onChange(async (new_value) => {
+								account.baseUri = new_value.trim();
+								await this.plugin.saveSettings();
+							});
+						t.inputEl.addClass("msgraph_baseuri");
+
+						return t;
+					})
+
+				s.infoEl.remove();
+
+				div.appendChild(title);
+				div.appendChild(s.settingEl);
+			}
+		);
+	}
+
+	add_mail_settings = (): void => {
+		new Setting(this.containerEl).setName("Mail related settings").setHeading()
+
+		new Setting(this.containerEl).setDesc("Mail folders you want to access");
+
+		new Setting(this.containerEl)
+			.setName("Add Mail Folder")
+			.addButton((button: ButtonComponent) => {
+				button
+					.setTooltip("Add additional mail folder")
+					.setButtonText("+")
+					.setCta()
+					.onClick(async () => {
+						this.plugin.settings.mailFolders.push(new MSGraphMailFolderAccess());
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+
+		this.plugin.settings.mailFolders.forEach(
+			(folder) => {
+				const div = this.containerEl.createEl("div");
+				div.addClass("msgraph_div");
+
+				const s = new Setting(this.containerEl)
+					.addExtraButton((extra) => {
+						extra
+							.setIcon("cross")
+							.setTooltip("Delete")
+							.onClick(async () => {
+								this.plugin.settings.mailFolders.splice(
+									this.plugin.settings.mailFolders.indexOf(folder),
+									1
+								);
+								await this.plugin.saveSettings();
 								// Force refresh
 								this.display();
 							});
@@ -253,9 +264,9 @@ export class MSGraphPluginSettingsTab extends PluginSettingTab {
 					const t = text
 						.setPlaceholder("Display Name")
 						.setValue(folder.displayName)
-						.onChange((new_value) => {
+						.onChange(async (new_value) => {
 							folder.displayName = new_value;
-							this.plugin.saveSettings();
+							await this.plugin.saveSettings();
 						});
 					t.inputEl.addClass("msgraph_display_name");
 
@@ -263,50 +274,54 @@ export class MSGraphPluginSettingsTab extends PluginSettingTab {
 				})
 				.addDropdown((dropdown) => {
 					const options: Record<string, string> = {invalid: "Choose Provider"}
-	
+
 					for (const account of this.plugin.settings.accounts) {
-						options[account.displayName] = account.displayName
+						if (account.displayName.trim()) {
+							options[account.displayName] = account.displayName
+						}
 					}
 					const d = dropdown
 						.addOptions(options)
-						.setValue(folder.provider)
-						.onChange((new_value) => {
+						.setValue(folder.provider in options ? folder.provider : "invalid")
+						.onChange(async (new_value) => {
 							folder.provider = new_value
-							this.plugin.saveSettings()
-							// Force refresh
-							this.display();
+							await this.plugin.saveSettings()
 						});
-						d.selectEl.addClass("msgraph_input")
+					d.selectEl.addClass("msgraph_input")
 				})
 				.addText((text) => {
 					text
-						.setPlaceholder("<Id or path>")
+						.setPlaceholder("<Folder Id>")
 						.setValue(folder.id)
-						.onChange((new_value) => {
-							folder.id = new_value
-							this.plugin.saveSettings()
-							// Force refresh
-							this.display();
+						.onChange(async (new_value) => {
+							folder.id = new_value.trim()
+							await this.plugin.saveSettings()
 						});
 				})
 				.addButton((button) => {
 					button
 						.setButtonText("Browse")
-						.setTooltip("Select search folder")
-						.onClick(() => {
-							if (this.plugin.checkProvider(folder.provider)) {
-								const modal = new SelectMailFolderModal(this.app, this.plugin)
-								modal.onChooseItem = (f:MailFolder, evt:Event) => {
-									folder.id = f.id
-									this.plugin.saveSettings()
-									this.display()
-								}
-	
-								this.plugin.mailHandler
-									.getMailFolders(this.plugin.msalProviders[folder.provider])
-									.then((folders) => modal.setFolders(folders))
-									.then(() => modal.open())
-	
+						.setTooltip("Select mail folder")
+						.onClick(async () => {
+							const provider = this.plugin.msalProviders.get(folder.provider)
+							if (!provider) {
+								new Notice("MSGraph: please choose an enabled account first.")
+								return
+							}
+
+							const modal = new SelectMailFolderModal(this.app, this.plugin)
+							modal.onChooseItem = async (f: MailFolder) => {
+								folder.id = f.id ?? ""
+								await this.plugin.saveSettings()
+								this.display()
+							}
+
+							try {
+								modal.setFolders(await this.plugin.mailHandler.getMailFolders(provider))
+								modal.open()
+							} catch (e) {
+								new Notice(`MSGraph: could not list mail folders: ${errorMessage(e)}`)
+								console.error(e)
 							}
 						})
 				})
@@ -314,115 +329,75 @@ export class MSGraphPluginSettingsTab extends PluginSettingTab {
 					const t = text
 						.setPlaceholder("Maximum number of mails to return")
 						.setValue(folder.limit.toString())
-						.onChange((new_value) => {
+						.onChange(async (new_value) => {
 							const new_limit = parseInt(new_value, 10)
-							if (!isNaN(new_limit)) {
-								folder.limit = new_limit
-								this.plugin.saveSettings()
-							} else {
-								this.display()
+							if (!isNaN(new_limit) && new_limit > 0) {
+								folder.limit = Math.min(new_limit, 1000)
+								await this.plugin.saveSettings()
 							}
 						})
-						t.inputEl.addClass("msgraph-number")
+					t.inputEl.addClass("msgraph_number")
+					t.inputEl.type = "number"
+					t.inputEl.min = "1"
+					t.inputEl.max = "1000"
 				})
 				.addDropdown((dropdown) => {
 					dropdown
 						.addOptions({all: "All emails", flagged: "Only flagged emails"})
 						.setValue(folder.onlyFlagged ? 'flagged' : 'all')
-						.onChange((new_value) => {
+						.onChange(async (new_value) => {
 							folder.onlyFlagged = new_value === 'flagged'
-							this.plugin.saveSettings()
+							await this.plugin.saveSettings()
 						})
-						
-						dropdown.selectEl.addClass("msgraph_input")
-					}
-				)
+
+					dropdown.selectEl.addClass("msgraph_input")
+				})
 
 				s.infoEl.remove();
-				
-                div.appendChild(this.containerEl.lastChild);
+
+				div.appendChild(s.settingEl);
 			});
-			
+	}
+
+	private add_template_setting = (
+		name: string,
+		desc: string,
+		defaultTemplate: string,
+		key: 'eventTemplate' | 'mailTemplate' | 'flaggedMailTemplate'
+	): void => {
+		new Setting(this.containerEl)
+			.setName(name)
+			.setDesc(desc)
+			.addButton((button) => {
+				button
+					.setButtonText("Default")
+					.setTooltip("Restore default template")
+					.onClick(async () => {
+						this.plugin.settings[key] = defaultTemplate
+						await this.plugin.saveSettings();
+						// Force refresh
+						this.display();
+					});
+			})
+			.addTextArea((text) => {
+				const t = text
+					.setPlaceholder("Template Text")
+					.setValue(this.plugin.settings[key])
+					.onChange(async (new_value) => {
+						this.plugin.settings[key] = new_value
+						await this.plugin.saveSettings()
+					})
+				t.inputEl.addClass("msgraph_template")
+			})
 	}
 
 	add_event_template = (): void => {
-        new Setting(this.containerEl)
-            .setName("Event Template")
-            .setDesc("Template for rendering Events")
-			.addButton((button) => {
-				button
-					.setButtonText("Default")
-					.setTooltip("Restore default template")
-					.onClick(() => {
-						this.plugin.settings.eventTemplate = defaultEventTemplate
-						this.plugin.saveSettings();
-						// Force refresh
-						this.display();
-					});
-			})
-			.addTextArea((text) => {
-				const t = text
-					.setPlaceholder("Template Text")
-					.setValue(this.plugin.settings.eventTemplate)
-					.onChange((new_value) => {
-						this.plugin.settings.eventTemplate = new_value
-						this.plugin.saveSettings()
-					})
-				t.inputEl.addClass("msgraph_template")
-			})
-		}
-	
-	add_mail_template = (): void => {
-		new Setting(this.containerEl)
-			.setName("Mail Template")
-			.setDesc("Template for rendering Mail items")
-			.addButton((button) => {
-				button
-					.setButtonText("Default")
-					.setTooltip("Restore default template")
-					.onClick(() => {
-						this.plugin.settings.mailTemplate = defaultMailTemplate
-						this.plugin.saveSettings();
-						// Force refresh
-						this.display();
-					});
-			})
-			.addTextArea((text) => {
-				const t = text
-					.setPlaceholder("Template Text")
-					.setValue(this.plugin.settings.mailTemplate)
-					.onChange((new_value) => {
-						this.plugin.settings.mailTemplate = new_value
-						this.plugin.saveSettings()
-					})
-				t.inputEl.addClass("msgraph_template")
-			})
-
-		new Setting(this.containerEl)
-			.setName("Flagged mail template")
-			.setDesc("Template for rendering flagged mail items as tasks")
-			.addButton((button) => {
-				button
-					.setButtonText("Default")
-					.setTooltip("Restore default template")
-					.onClick(() => {
-						this.plugin.settings.flaggedMailTemplate = defaultFlaggedMailTemplate
-						this.plugin.saveSettings();
-						// Force refresh
-						this.display();
-					});
-			})
-			.addTextArea((text) => {
-				const t = text
-					.setPlaceholder("Template Text")
-					.setValue(this.plugin.settings.flaggedMailTemplate)
-					.onChange((new_value) => {
-						this.plugin.settings.flaggedMailTemplate = new_value
-						this.plugin.saveSettings()
-					})
-				t.inputEl.addClass("msgraph_template")
-			})
-
+		this.add_template_setting("Event Template", "Template for rendering Events", defaultEventTemplate, 'eventTemplate')
 	}
-        
+
+	add_mail_template = (): void => {
+		this.add_template_setting("Mail Template", "Template for rendering Mail items", defaultMailTemplate, 'mailTemplate')
+		this.add_template_setting("Flagged mail template", "Template for rendering flagged mail items as tasks",
+			defaultFlaggedMailTemplate, 'flaggedMailTemplate')
+	}
 }
