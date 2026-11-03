@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-msgraph-plugin",
-	"version": "0.10.0",
+	"version": "0.10.1",
 	"description": "This plugin allows to query MSGraph from obsidian.",
 	"main": "main.js",
 	"scripts": {
